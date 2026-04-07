@@ -1,0 +1,134 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const db = require('./db');
+
+const app = express();
+app.use(bodyParser.json());
+
+/* ================================
+        UPDATE KOLEKSI BUKU
+================================ */
+app.put('/koleksi/:id', (req, res) => {
+    const id = req.params.id;
+    const { judul_koleksi, pengarang, tahun } = req.body;
+
+    const sql = `
+        UPDATE mst_koleksi_buku
+        SET judul_koleksi = ?, pengarang = ?, tahun = ?
+        WHERE id_koleksi = ? AND is_delete = 0
+    `;
+
+    db.query(sql, [judul_koleksi, pengarang, tahun, id], (err, result) => {
+        if (err) return res.status(500).json(err);
+
+        res.json({
+            message: "Data berhasil diupdate",
+            result
+        });
+    });
+});
+
+
+/* ================================
+    DELETE KOLEKSI (SOFT DELETE)
+================================ */
+app.delete('/koleksi/:id', (req, res) => {
+    const id = req.params.id;
+
+    const cekPinjam = `
+        SELECT * FROM tr_peminjaman
+        WHERE id_cp_koleksi = ? AND status_peminjaman = 'dipinjam'
+    `;
+
+    db.query(cekPinjam, [id], (err, rows) => {
+        if (err) return res.status(500).json(err);
+
+        if (rows.length > 0) {
+            return res.json({
+                message: "Buku sedang dipinjam, tidak bisa dihapus"
+            });
+        }
+
+        const softDelete = `
+            UPDATE mst_koleksi_buku
+            SET is_delete = 1
+            WHERE id_koleksi = ?
+        `;
+
+        db.query(softDelete, [id], (err, result) => {
+            if (err) return res.status(500).json(err);
+
+            res.json({
+                message: "Data berhasil dihapus (soft delete)",
+                result
+            });
+        });
+    });
+});
+
+
+/* ================================
+        TAMPILKAN KOLEKSI
+   (Pagination + Filter + Sorting)
+================================ */
+app.get('/koleksi', (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+    const search = req.query.search || '';
+    const sort = req.query.sort || 'judul_koleksi';
+
+    const offset = (page - 1) * limit;
+
+    const sql = `
+        SELECT * FROM mst_koleksi_buku
+        WHERE is_delete = 0
+        AND (judul_koleksi LIKE ? OR pengarang LIKE ?)
+        ORDER BY ${sort}
+        LIMIT ? OFFSET ?
+    `;
+
+    db.query(sql, [`%${search}%`, `%${search}%`, limit, offset], (err, result) => {
+        if (err) return res.status(500).json(err);
+
+        res.json({
+            page,
+            limit,
+            data: result
+        });
+    });
+});
+
+
+/* ================================
+            SEARCH KOLEKSI
+================================ */
+app.get('/koleksi/search', (req, res) => {
+    const keyword = req.query.keyword || '';
+
+    const sql = `
+        SELECT * FROM mst_koleksi_buku
+        WHERE is_delete = 0
+        AND (
+            judul_koleksi LIKE ? OR
+            pengarang LIKE ? OR
+            ISBN LIKE ?
+        )
+    `;
+
+    db.query(sql, [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`], (err, result) => {
+        if (err) return res.status(500).json(err);
+
+        res.json({
+            total: result.length,
+            data: result
+        });
+    });
+});
+
+
+/* ================================
+   RUN SERVER
+================================ */
+app.listen(3000, () => {
+    console.log('Server running on port 3000');
+});
